@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Instagram Extension Test</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            max-width: 800px; 
+            margin: 0 auto; 
+            padding: 20px; 
+            background: #f5f5f5;
+        }
+        .card { 
+            background: white; 
+            padding: 20px; 
+            border-radius: 8px; 
+            margin: 20px 0; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .step {
+            background: #e3f2fd;
+            padding: 15px;
+            border-left: 4px solid #2196f3;
+            margin: 10px 0;
+        }
+        .warning {
+            background: #fff3e0;
+            padding: 15px;
+            border-left: 4px solid #ff9800;
+            margin: 10px 0;
+        }
+        code {
+            background: #f5f5f5;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+        pre {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔧 Instagram Image Scraper - Troubleshooting Guide</h1>
+    
+    <div class="card">
+        <h2>❗ Common Issues & Solutions</h2>
+        
+        <h3>1. Extension Not Showing Button</h3>
+        <div class="step">
+            <strong>Check:</strong> Are you on an Instagram profile page? (like instagram.com/for_everyoung10)
+            <br>The button only appears on profile pages, not on individual posts or feeds.
+        </div>
+        
+        <h3>2. "No Images Found" Error</h3>
+        <div class="step">
+            <strong>Causes:</strong>
+            <ul>
+                <li>Private account - Instagram blocks access</li>
+                <li>Instagram UI changes - selectors may be outdated</li>
+                <li>Rate limiting - Instagram is blocking requests</li>
+                <li>Network issues or content blockers</li>
+            </ul>
+        </div>
+        
+        <h3>3. Extension Installation Issues</h3>
+        <div class="step">
+            <strong>Steps to install:</strong>
+            <ol>
+                <li>Open Chrome and go to <code>chrome://extensions/</code></li>
+                <li>Enable "Developer mode" (top right toggle)</li>
+                <li>Click "Load unpacked"</li>
+                <li>Select the extension folder</li>
+                <li>The extension should appear in the list</li>
+            </ol>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>🚀 How to Use the Enhanced Extension</h2>
+        
+        <div class="step">
+            <strong>Step 1:</strong> Install the extension using the fixed files:
+            <ul>
+                <li><code>content_fixed.js</code> - Enhanced scraper with better error handling</li>
+                <li><code>manifest_fixed.json</code> - Updated permissions and settings</li>
+            </ul>
+        </div>
+        
+        <div class="step">
+            <strong>Step 2:</strong> Navigate to an Instagram profile (e.g., instagram.com/for_everyoung10)
+        </div>
+        
+        <div class="step">
+            <strong>Step 3:</strong> Look for the red "Get All Images" button in the top-right corner
+        </div>
+        
+        <div class="step">
+            <strong>Step 4:</strong> Click the button and follow the prompts
+        </div>
+        
+        <div class="step">
+            <strong>Step 5:</strong> Use "Test Selectors" button if images aren't found
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>🔍 Debugging Features</h2>
+        
+        <h3>Enhanced Error Reporting</h3>
+        <p>The fixed version includes:</p>
+        <ul>
+            <li><strong>Selector Testing:</strong> "Test Selectors" button to check if Instagram elements are found</li>
+            <li><strong>Console Logging:</strong> Detailed debug information in browser console (F12)</li>
+            <li><strong>Error Collection:</strong> All errors are collected and shown in the results modal</li>
+            <li><strong>Fallback Selectors:</strong> Multiple strategies to find Instagram elements</li>
+        </ul>
+        
+        <h3>Modern API Usage</h3>
+        <ul>
+            <li>Modern clipboard API with fallback</li>
+            <li>Better CORS handling for image downloads</li>
+            <li>Improved timing and delays</li>
+            <li>Enhanced UI with better feedback</li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <h2>⚠️ Important Notes</h2>
+        
+        <div class="warning">
+            <strong>Instagram Changes:</strong> Instagram frequently updates their website structure. 
+            If the extension stops working, the selectors may need updating.
+        </div>
+        
+        <div class="warning">
+            <strong>Rate Limiting:</strong> Instagram may temporarily block requests if you use the extension too frequently. 
+            Wait a few hours if you encounter rate limiting.
+        </div>
+        
+        <div class="warning">
+            <strong>Private Accounts:</strong> The extension cannot access private Instagram accounts. 
+            You must be logged in and following the account, or the account must be public.
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>🛠️ Alternative: Use gallery-dl (Recommended)</h2>
+        
+        <p>Since <code>gallery-dl</code> is working well for you, consider using it instead:</p>
+        
+        <pre><code># Extract URLs only (no download)
+python insta_gallery_dl_advanced.py --profile for_everyoung10 --limit 100
+
+# With authentication for better results
+python insta_gallery_dl_advanced.py --username your_username --password your_password</code></pre>
+        
+        <p><strong>Advantages of gallery-dl:</strong></p>
+        <ul>
+            <li>More reliable and actively maintained</li>
+            <li>Better rate limiting handling</li>
+            <li>Works without browser extension setup</li>
+            <li>More consistent results</li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <h2>📝 Installation Instructions for Fixed Extension</h2>
+        
+        <div class="step">
+            <strong>Option 1: Replace existing files</strong>
+            <ol>
+                <li>Rename <code>content_fixed.js</code> to <code>content.js</code></li>
+                <li>Rename <code>manifest_fixed.json</code> to <code>manifest.json</code></li>
+                <li>Reload the extension in Chrome</li>
+            </ol>
+        </div>
+        
+        <div class="step">
+            <strong>Option 2: Create new extension folder</strong>
+            <ol>
+                <li>Create a new folder called <code>extension_fixed</code></li>
+                <li>Copy the fixed files into it</li>
+                <li>Install as a new extension</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        // Simple page functionality
+        console.log('Instagram Extension Test Page Loaded');
+        console.log('This page helps debug extension issues');
+        
+        // Check if we're on Instagram
+        if (window.location.hostname.includes('instagram.com')) {
+            document.body.style.background = '#e8f5e8';
+            const notice = document.createElement('div');
+            notice.innerHTML = '✅ <strong>You are on Instagram!</strong> The extension should work here.';
+            notice.style.cssText = 'background: #4caf50; color: white; padding: 15px; border-radius: 6px; margin: 20px 0; text-align: center; font-weight: bold;';
+            document.body.insertBefore(notice, document.body.firstChild);
+        }
+    </script>
+</body>
+</html>

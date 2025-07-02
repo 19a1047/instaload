@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Instagram Image Link Scraper Enhanced",
+  "version": "2.0",
+  "description": "Enhanced floating button to scrape all images from Instagram profile with better error handling and modern selectors.",
+  "permissions": ["scripting", "activeTab", "storage"],
+  "host_permissions": [
+    "https://www.instagram.com/*",
+    "https://*.cdninstagram.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://www.instagram.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["*.js"],
+      "matches": ["https://www.instagram.com/*"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Instagram Image Scraper"
+  }
+}
