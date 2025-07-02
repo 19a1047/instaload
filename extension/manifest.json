@@ -17,8 +17,8 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["*.js"],
-      "matches": ["https://www.instagram.com/*"]
+      "resources": ["jzip.js"],
+      "matches": ["<all_urls>"]
     }
   ],
   "action": {

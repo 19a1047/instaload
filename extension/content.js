@@ -156,25 +156,30 @@ async function copyToClipboard(text) {
   }
 }
 
-// JSZip loader with error handling
+// fflate loader with local fallback for extension
 function loadJSZip() {
   return new Promise((resolve, reject) => {
     if (window.JSZip) return resolve(window.JSZip);
     const script = document.createElement("script");
-    script.src =
-      "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+    script.src = chrome.runtime.getURL("jszip.js");
     script.onload = () => {
-      debugLog("JSZip loaded successfully");
-      resolve(window.JSZip);
+      setTimeout(() => {
+        if (window.JSZip) {
+          debugLog("JSZip loaded from local extension file");
+          resolve(window.JSZip);
+        } else {
+          debugLog("JSZip script loaded but window.JSZip missing");
+          reject(new Error("JSZip loaded but not available"));
+        }
+      }, 100);
     };
     script.onerror = () => {
-      debugLog("Failed to load JSZip");
-      reject(new Error("Failed to load JSZip"));
+      debugLog("Failed to load local jszip.js");
+      reject(new Error("Failed to load local jszip.js"));
     };
-    document.head.appendChild(script);
+    (document.head || document.documentElement).appendChild(script);
   });
 }
-
 // == Enhanced Button Management ==
 function createBtn() {
   if (document.getElementById("ig-getall-btn")) return;
@@ -184,10 +189,10 @@ function createBtn() {
 
   const btn = document.createElement("button");
   btn.id = "ig-getall-btn";
-  btn.textContent = "Get All Images";
-  btn.title = "Extract all images from this Instagram profile";
+  btn.textContent = "Get Images (Smart)";
+  btn.title =
+    "Smart Mode: Extract images from carousel posts only (most efficient)";
   document.body.appendChild(btn);
-  debugLog("Button appended to body", btn);
   btn.onclick = mainIGScraper;
 
   debugLog("Button created");
@@ -287,6 +292,111 @@ function showModal(links, errors = []) {
   testBtn.onclick = () => testSelectors(modal);
   modal.appendChild(testBtn);
 
+  // Test carousel detection button
+  const testCarouselBtn = document.createElement("button");
+  testCarouselBtn.textContent = "Test Carousel Detection";
+  testCarouselBtn.style.marginLeft = "10px";
+  testCarouselBtn.onclick = async () => {
+    const activeModal = document.querySelector('div[role="dialog"]');
+    if (activeModal) {
+      debugLog("=== ENHANCED CAROUSEL DETECTION TEST ===");
+      const isCarousel = await isCarouselPost(activeModal);
+      debugLog(`Is carousel: ${isCarousel}`);
+
+      // Focus on post content area
+      const postContent =
+        activeModal.querySelector('[role="dialog"] > div > div') ||
+        activeModal.querySelector("article") ||
+        activeModal.querySelector('[data-testid="post-content"]') ||
+        activeModal;
+
+      // Test enhanced button detection (same as navigation function)
+      const nextButtonSelectors = [
+        'button[aria-label="Next"]',
+        'button[aria-label*="next" i]',
+        'button[aria-label="Go to next media"]',
+        'button[aria-label="Next media"]',
+        '[role="button"][aria-label*="next" i]',
+        // Look for SVG-based next buttons
+        'button:has(svg[aria-label="Next"])',
+        'button:has(svg[aria-label*="next" i])',
+        // Look for elements containing next arrows
+        'button svg[aria-label="Next"]',
+        'button svg[aria-label*="next" i]',
+        // Fallback: look for any button in carousel area with arrow-like content
+        'button[style*="position: absolute"]', // Often carousel buttons are absolutely positioned
+      ];
+
+      let allNextButtons = [];
+      debugLog(`Testing ${nextButtonSelectors.length} button selectors:`);
+
+      nextButtonSelectors.forEach((selector, index) => {
+        try {
+          const buttons = postContent.querySelectorAll(selector);
+          debugLog(
+            `  Selector ${index + 1} (${selector}): ${buttons.length} found`
+          );
+
+          for (const btn of buttons) {
+            const actualButton = btn.closest("button") || btn;
+            if (
+              actualButton.tagName === "BUTTON" &&
+              !allNextButtons.includes(actualButton)
+            ) {
+              allNextButtons.push(actualButton);
+            }
+          }
+        } catch (e) {
+          debugLog(`  Selector ${index + 1} failed: ${e.message}`);
+        }
+      });
+
+      debugLog(`Total unique buttons found: ${allNextButtons.length}`);
+
+      allNextButtons.forEach((btn, i) => {
+        const rect = btn.getBoundingClientRect();
+        const isCarouselBtn = isLikelyCarouselButton(btn, activeModal);
+        const classes = btn.className || "";
+        const parentClasses = btn.closest("div")?.className || "";
+        const ariaLabel = btn.getAttribute("aria-label") || "none";
+        const hasRotatedSVG = btn.querySelector('[style*="rotate(90deg)"]')
+          ? "YES"
+          : "NO";
+
+        debugLog(
+          `Button ${i + 1}: ${rect.width}x${rect.height} at (${rect.left}, ${
+            rect.top
+          }) - isCarousel: ${isCarouselBtn}`
+        );
+        debugLog(`  Aria-label: "${ariaLabel}"`);
+        debugLog(`  Classes: "${classes}"`);
+        debugLog(`  Parent classes: "${parentClasses}"`);
+        debugLog(`  Has rotated SVG: ${hasRotatedSVG}`);
+        debugLog(`  HTML: ${btn.outerHTML.substring(0, 200)}...`);
+      });
+
+      // Check for carousel indicators
+      const carouselSvg = postContent.querySelector(
+        'svg[aria-label="Carousel"]'
+      );
+      debugLog(`Carousel SVG in post content: ${carouselSvg ? "YES" : "NO"}`);
+
+      if (carouselSvg) {
+        const svgRect = carouselSvg.getBoundingClientRect();
+        const modalRect = activeModal.getBoundingClientRect();
+        const isInMainContent =
+          svgRect.top > modalRect.top + 60 &&
+          svgRect.bottom < modalRect.bottom - 60 &&
+          svgRect.left > modalRect.left + 50 &&
+          svgRect.right < modalRect.right - 50;
+        debugLog(`Carousel SVG is in main content area: ${isInMainContent}`);
+      }
+    } else {
+      debugLog("No modal open - click on a post first");
+    }
+  };
+  modal.appendChild(testCarouselBtn);
+
   if (links.length > 0) {
     // Info text
     const info = document.createElement("div");
@@ -303,12 +413,19 @@ function showModal(links, errors = []) {
     ta.value = links.map((link, i) => `${i + 1},${link}`).join("\n");
     modal.appendChild(ta);
 
-    // Download ZIP button
+    // Download ZIP button (JSZip)
     const zipBtn = document.createElement("button");
     zipBtn.id = "ig-getall-zip";
-    zipBtn.textContent = "Download ZIP";
-    zipBtn.onclick = async () => downloadAsZip(links, zipBtn);
+    zipBtn.textContent = "Download ZIP (JSZip)";
+    zipBtn.onclick = async () => downloadAsZipJszip(links, zipBtn);
     modal.appendChild(zipBtn);
+
+    // Download TXT button
+    const txtBtn = document.createElement("button");
+    txtBtn.id = "ig-getall-txt";
+    txtBtn.textContent = "Download All as TXT";
+    txtBtn.onclick = () => downloadAsTxt(links, txtBtn);
+    modal.appendChild(txtBtn);
 
     // Copy button
     const copyBtn = document.createElement("button");
@@ -350,6 +467,66 @@ function showModal(links, errors = []) {
   }
 
   document.body.appendChild(modal);
+}
+
+// == Enhanced Post Collection ==
+async function collectPostLinks(errors) {
+  const postLinks = new Set();
+  const maxScrolls = 50;
+  const targetPosts = 500;
+
+  // Scroll to top
+  window.scrollTo(0, 0);
+  await wait(1000);
+
+  for (let i = 0; i < maxScrolls; i++) {
+    // Scroll down
+    const oldHeight = document.body.scrollHeight;
+    window.scrollTo(0, document.body.scrollHeight);
+    await randomDelay(1500, 2500);
+
+    // Collect post links using multiple selectors
+    const selectors = [
+      'a[href*="/p/"]',
+      'article a[href*="/p/"]',
+      '[role="main"] a[href*="/p/"]',
+    ];
+
+    for (const selector of selectors) {
+      try {
+        document.querySelectorAll(selector).forEach((link) => {
+          const href = link.href;
+          if (href && href.includes("/p/")) {
+            const match = href.match(/\/p\/([^\/\?]+)/);
+            if (match) {
+              // Clean up URL: remove query params and normalize slashes
+              let cleanUrl = href.split("?")[0].replace(/\/+$/, "") + "/";
+              postLinks.add(cleanUrl);
+              debugLog(`Added post URL: ${cleanUrl}`);
+            }
+          }
+        });
+      } catch (error) {
+        errors.push(`Error with selector ${selector}: ${error.message}`);
+      }
+    }
+
+    // Check if we found enough posts or page stopped loading
+    if (postLinks.size >= targetPosts) break;
+    if (document.body.scrollHeight === oldHeight) {
+      debugLog(`Scrolling stopped at ${i + 1} scrolls`);
+      break;
+    }
+
+    debugLog(`Scroll ${i + 1}: Found ${postLinks.size} posts`);
+  }
+
+  // Scroll back to top after collecting all posts
+  debugLog("Scrolling back to top after post collection...");
+  window.scrollTo(0, 0);
+  await wait(1500);
+
+  return Array.from(postLinks).slice(0, targetPosts);
 }
 
 // == Testing Function ==
@@ -419,50 +596,83 @@ function testSelectors(modal) {
   );
 }
 
-// == Enhanced ZIP Download ==
-async function downloadAsZip(links, button) {
+// Download all URLs as TXT file
+function downloadAsTxt(links, button) {
+  const originalText = button.textContent;
+  button.disabled = true;
+  try {
+    const blob = new Blob([links.join("\n")], { type: "text/plain" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `instagram-urls-${new Date().toISOString().split("T")[0]}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    button.textContent = "Downloaded!";
+    setTimeout(() => {
+      button.textContent = originalText;
+      button.disabled = false;
+    }, 2000);
+  } catch (err) {
+    button.textContent = "Failed";
+    setTimeout(() => {
+      button.textContent = originalText;
+      button.disabled = false;
+    }, 2000);
+  }
+}
+
+// == Enhanced ZIP Download with Better Error Handling ==
+async function downloadAsZipJszip(links, button) {
   const originalText = button.textContent;
   button.disabled = true;
   button.textContent = "Loading JSZip...";
-
   try {
-    await loadJSZip();
-    const zip = new window.JSZip();
+    const JSZip = await loadJSZip();
     let successCount = 0;
     let failCount = 0;
-
-    for (let i = 0; i < links.length; i++) {
-      const url = links[i];
-      const filename =
-        url.split("?")[0].split("/").pop() || `ig-img-${i + 1}.jpg`;
-
-      button.textContent = `Downloading ${i + 1}/${links.length}...`;
-
-      try {
-        const response = await fetch(url, {
-          mode: "cors",
-          headers: {
-            Referer: "https://www.instagram.com/",
-          },
-        });
-
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-        const blob = await response.blob();
-        zip.file(filename, blob);
-        successCount++;
-
-        await wait(100); // Small delay between downloads
-      } catch (error) {
-        debugLog(`Failed to download ${url}:`, error);
-        failCount++;
+    const zip = new JSZip();
+    const batchSize = 5;
+    const batches = [];
+    for (let i = 0; i < links.length; i += batchSize) {
+      batches.push(links.slice(i, i + batchSize));
+    }
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
+      button.textContent = `Batch ${batchIndex + 1}/${
+        batches.length
+      } (${successCount}/${links.length})...`;
+      const promises = batch.map(async (url, index) => {
+        const globalIndex = batchIndex * batchSize + index;
+        const filename = extractFilename(url, globalIndex);
+        try {
+          const blob = await downloadImageWithFallback(url);
+          zip.file(filename, blob);
+          return { success: true };
+        } catch (error) {
+          debugLog(`Failed to download ${url}:`, error);
+          return { success: false };
+        }
+      });
+      const results = await Promise.allSettled(promises);
+      results.forEach((result) => {
+        if (result.status === "fulfilled" && result.value.success) {
+          successCount++;
+        } else {
+          failCount++;
+        }
+      });
+      if (batchIndex < batches.length - 1) {
+        await wait(500);
       }
     }
-
+    if (successCount === 0) {
+      throw new Error(
+        "No images could be downloaded. Likely CORS issue. Use TXT/CSV with a download manager."
+      );
+    }
     button.textContent = "Creating ZIP...";
     const zipBlob = await zip.generateAsync({ type: "blob" });
-
-    // Create download
     const a = document.createElement("a");
     a.href = URL.createObjectURL(zipBlob);
     a.download = `instagram-images-${
@@ -471,18 +681,18 @@ async function downloadAsZip(links, button) {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-
     button.textContent = `Downloaded! (${successCount}/${links.length})`;
-    if (failCount > 0) {
-      setTimeout(() => {
-        button.textContent = originalText;
-        button.disabled = false;
-      }, 3000);
-    }
+    setTimeout(() => {
+      button.textContent = originalText;
+      button.disabled = false;
+    }, 4000);
   } catch (error) {
-    debugLog("ZIP download failed:", error);
+    debugLog("JSZip ZIP download failed:", error);
     button.textContent = "Download Failed";
     button.style.background = "#f44336";
+    alert(
+      `ZIP Download Failed: ${error.message}\n\nTip: Copy the CSV/TXT list and use a download manager like IDM or JDownloader instead.`
+    );
     setTimeout(() => {
       button.textContent = originalText;
       button.style.background = "#5864ff";
@@ -491,23 +701,113 @@ async function downloadAsZip(links, button) {
   }
 }
 
+// Extract clean filename from URL
+function extractFilename(url, index) {
+  try {
+    const urlParts = url.split("?")[0].split("/");
+    let filename = urlParts[urlParts.length - 1];
+
+    if (!filename || !filename.includes(".")) {
+      // Fallback filename
+      filename = `ig-img-${index + 1}.jpg`;
+    }
+
+    // Ensure valid filename
+    filename = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+
+    return filename;
+  } catch (error) {
+    return `ig-img-${index + 1}.jpg`;
+  }
+}
+
+// Download image with multiple fallback strategies
+async function downloadImageWithFallback(url) {
+  const strategies = [
+    // Strategy 1: Direct fetch with CORS headers
+    async () => {
+      const response = await fetch(url, {
+        method: "GET",
+        mode: "cors",
+        headers: {
+          Referer: "https://www.instagram.com/",
+          "User-Agent": navigator.userAgent,
+        },
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.blob();
+    },
+
+    // Strategy 2: No-cors mode (may work but limited)
+    async () => {
+      const response = await fetch(url, {
+        method: "GET",
+        mode: "no-cors",
+      });
+      return await response.blob();
+    },
+
+    // Strategy 3: Image element approach
+    async () => {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => {
+          try {
+            const canvas = document.createElement("canvas");
+            const ctx = canvas.getContext("2d");
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            ctx.drawImage(img, 0, 0);
+            canvas.toBlob(resolve, "image/jpeg", 0.9);
+          } catch (error) {
+            reject(error);
+          }
+        };
+        img.onerror = () => reject(new Error("Image load failed"));
+        img.src = url;
+
+        // Timeout after 10 seconds
+        setTimeout(() => reject(new Error("Image load timeout")), 10000);
+      });
+    },
+  ];
+
+  let lastError;
+  for (const strategy of strategies) {
+    try {
+      const blob = await strategy();
+      if (blob && blob.size > 0) {
+        return blob;
+      }
+    } catch (error) {
+      lastError = error;
+      continue;
+    }
+  }
+
+  throw lastError || new Error("All download strategies failed");
+}
+
 // == Enhanced Instagram Scraper with Modern Selectors ==
 async function mainIGScraper() {
   const btn = document.getElementById("ig-getall-btn");
   if (!btn) return;
 
-  // Confirmation
-  if (
-    !confirm(
-      "This will scroll through the Instagram profile and extract image URLs from posts.\n\n" +
-        "⚠️ This may take several minutes and will:\n" +
-        "• Scroll through the profile\n" +
-        "• Open individual posts\n" +
-        "• Extract high-quality image URLs\n\n" +
-        "Continue?"
-    )
-  )
-    return;
+  // Enhanced confirmation with smart carousel option
+  const choice = prompt(
+    "Instagram Image Extractor Options:\n\n" +
+      "1 = SMART MODE (carousels only - fastest, most efficient)\n" +
+      "2 = Full extraction (all posts - slower but complete)\n" +
+      "3 = Quick extraction (visible images only)\n" +
+      "4 = API Extraction (fastest, most robust)\n\n" +
+      "Enter 1, 2, 3, or 4:",
+    "1"
+  );
+
+  if (!choice || !["1", "2", "3", "4"].includes(choice)) {
+    return; // User cancelled or invalid choice
+  }
 
   // Set loading state
   btn.classList.add("loading");
@@ -525,29 +825,19 @@ async function mainIGScraper() {
 
     debugLog("Starting Instagram scraper...");
 
-    // Phase 1: Collect post links
-    btn.textContent = "Scrolling & collecting posts...";
-    const postLinks = await collectPostLinks(errors);
-
-    debugLog(`Found ${postLinks.length} unique posts`);
-
-    if (postLinks.length === 0) {
-      throw new Error(
-        "No posts found. The profile might be private or have no posts."
-      );
+    if (choice === "1") {
+      // Smart carousel mode
+      await smartCarouselMode(btn, errors);
+    } else if (choice === "2") {
+      // Full extraction mode
+      await fullExtractionMode(btn, errors);
+    } else if (choice === "3") {
+      // Quick extraction mode
+      await quickExtractionMode(btn, errors);
+    } else if (choice === "4") {
+      // API Extraction mode
+      await extractAllMediaViaGraphQL(errors, btn);
     }
-
-    // Phase 2: Extract images from posts
-    btn.textContent = "Extracting images...";
-    const imageUrls = await extractImagesFromPosts(postLinks, errors, btn);
-
-    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-    debugLog(
-      `Extraction completed in ${duration}s. Found ${imageUrls.length} images.`
-    );
-
-    // Show results
-    showModal(Array.from(imageUrls), errors);
   } catch (error) {
     debugLog("Scraper failed:", error);
     errors.push(`Fatal error: ${error.message}`);
@@ -555,253 +845,388 @@ async function mainIGScraper() {
   } finally {
     // Reset button
     btn.classList.remove("loading");
-    btn.textContent = "Get All Images";
+    btn.textContent = "Get Images (Smart)";
     btn.disabled = false;
   }
 }
 
-// == Enhanced Post Collection ==
-async function collectPostLinks(errors) {
-  const postLinks = new Set();
-  const maxScrolls = 50;
-  const targetPosts = 500;
+// Smart carousel mode (NEW - only processes carousel posts)
+async function smartCarouselMode(btn, errors) {
+  debugLog("Starting SMART MODE - targeting carousel posts only...");
 
-  // Scroll to top
+  // Ensure we start from the top of the page
   window.scrollTo(0, 0);
   await wait(1000);
 
-  for (let i = 0; i < maxScrolls; i++) {
-    // Scroll down
-    const oldHeight = document.body.scrollHeight;
-    window.scrollTo(0, document.body.scrollHeight);
-    await randomDelay(1500, 2500);
+  // Phase 1: Collect only carousel post links
+  btn.textContent = "Smart collection - finding carousels...";
+  const carouselLinks = await collectCarouselPostLinks(errors);
 
-    // Collect post links using multiple selectors
-    const selectors = [
-      'a[href*="/p/"]',
-      'article a[href*="/p/"]',
-      '[role="main"] a[href*="/p/"]',
-    ];
+  debugLog(`Smart mode found ${carouselLinks.length} carousel posts`);
 
-    for (const selector of selectors) {
-      try {
-        document.querySelectorAll(selector).forEach((link) => {
-          const href = link.href;
-          if (href && href.includes("/p/")) {
-            const match = href.match(/\/p\/([^\/\?]+)/);
-            if (match) {
-              postLinks.add(href.split("?")[0] + "/");
-            }
-          }
-        });
-      } catch (error) {
-        errors.push(`Error with selector ${selector}: ${error.message}`);
-      }
-    }
-
-    // Check if we found enough posts or page stopped loading
-    if (postLinks.size >= targetPosts) break;
-    if (document.body.scrollHeight === oldHeight) {
-      debugLog(`Scrolling stopped at ${i + 1} scrolls`);
-      break;
-    }
-
-    debugLog(`Scroll ${i + 1}: Found ${postLinks.size} posts`);
+  if (carouselLinks.length === 0) {
+    throw new Error(
+      "No carousel posts found. Try full mode to get single images too, or the profile might be private."
+    );
   }
 
-  return Array.from(postLinks).slice(0, targetPosts);
+  // Phase 2: Extract images from carousel posts only
+  btn.textContent = "Extracting from carousels...";
+  const imageUrls = await extractImagesFromPosts(
+    carouselLinks,
+    errors,
+    btn,
+    true
+  ); // Pass smart mode flag
+
+  const duration = ((Date.now() - Date.now()) / 1000).toFixed(1);
+  debugLog(
+    `Smart mode completed. Found ${imageUrls.size} images from ${carouselLinks.length} carousels.`
+  );
+
+  // Show results with smart mode info
+  const smartModeNote = [
+    `=== SMART MODE RESULTS ===`,
+    `Processed: ${carouselLinks.length} carousel posts (skipped single posts)`,
+    `Total images found: ${imageUrls.size}`,
+    `Efficiency: ~${(imageUrls.size / carouselLinks.length).toFixed(
+      1
+    )} images per carousel`,
+    ``,
+    `Note: Single-image posts were skipped for efficiency.`,
+    `Use "Full Mode" if you need single images too.`,
+  ];
+
+  errors.unshift(...smartModeNote);
+  showModal(Array.from(imageUrls), errors);
 }
 
-// == Enhanced Image Extraction ==
-async function extractImagesFromPosts(postLinks, errors, btn) {
+// Full extraction mode (gallery-dl style: all posts, all images)
+async function fullExtractionMode(btn, errors) {
+  // Ensure we start from the top of the page
+  debugLog("Ensuring we start from top of page...");
+  window.scrollTo(0, 0);
+  await wait(1000);
+
+  // Phase 1: Collect post links
+  btn.textContent = "Scrolling & collecting posts...";
+  const postLinks = await collectPostLinks(errors);
+
+  debugLog(`Found ${postLinks.length} unique posts`);
+
+  if (postLinks.length === 0) {
+    throw new Error(
+      "No posts found. The profile might be private or have no posts."
+    );
+  }
+
+  // Phase 2: Extract images from posts (process ALL posts, single and carousel)
+  btn.textContent = "Extracting images...";
   const imageUrls = new Set();
-  const maxPostsToProcess = Math.min(postLinks.length, 100); // Limit for safety
+  const maxPostsToProcess = Math.min(postLinks.length, 50); // For performance
+  let processedCount = 0;
+  let successCount = 0;
+
+  debugLog(
+    `Starting to process ${maxPostsToProcess} posts out of ${postLinks.length} found`
+  );
 
   for (let i = 0; i < maxPostsToProcess; i++) {
     const postUrl = postLinks[i];
-    btn.textContent = `Processing post ${i + 1}/${maxPostsToProcess}...`;
+    const startImageCount = imageUrls.size;
+
+    btn.textContent = `Processing post ${
+      i + 1
+    }/${maxPostsToProcess} (${successCount} successful)...`;
+    debugLog(`\n--- Processing post ${i + 1}: ${postUrl} ---`);
 
     try {
-      await openAndExtractFromPost(postUrl, imageUrls, errors);
+      // Always process all posts, regardless of type
+      await openAndExtractFromPost(postUrl, imageUrls, errors, false); // smartMode = false
+
+      const newImages = imageUrls.size - startImageCount;
+      if (newImages > 0) {
+        successCount++;
+        debugLog(`✓ Post ${i + 1} successful: ${newImages} images added`);
+      } else {
+        debugLog(`⚠ Post ${i + 1}: No new images found`);
+      }
+
+      processedCount++;
     } catch (error) {
-      errors.push(`Post ${i + 1} error: ${error.message}`);
-      debugLog(`Failed to process post ${postUrl}:`, error);
+      errors.push(`Post ${i + 1} (${postUrl}): ${error.message}`);
+      debugLog(`✗ Post ${i + 1} failed: ${error.message}`);
+      processedCount++;
     }
 
-    // Add delay between posts
-    await randomDelay(1000, 2000);
+    // Add delay between posts - longer delay to avoid Instagram detection
+    await randomDelay(2000, 4000);
+
+    // Progress update
+    if (i % 5 === 0 && i > 0) {
+      debugLog(
+        `Progress: ${i}/${maxPostsToProcess} posts processed, ${imageUrls.size} total images found`
+      );
+    }
+
+    // Early termination if we have many images
+    if (imageUrls.size >= 200) {
+      debugLog(`Reached 200 images, stopping early`);
+      break;
+    }
   }
 
-  return imageUrls;
+  debugLog(`\n=== Extraction Summary ===`);
+  debugLog(`Posts processed: ${processedCount}/${maxPostsToProcess}`);
+  debugLog(`Successful extractions: ${successCount}`);
+  debugLog(`Total images found: ${imageUrls.size}`);
+  debugLog(`Errors encountered: ${errors.length}`);
+
+  // Show results
+  showModal(Array.from(imageUrls), errors);
 }
 
-// == Enhanced Single Post Processing ==
-async function openAndExtractFromPost(postUrl, imageUrls, errors) {
-  // Find and click the post link
-  const postLink = findPostLink(postUrl);
-  if (!postLink) {
-    throw new Error(`Could not find clickable link for ${postUrl}`);
-  }
+// Open a post in a modal, extract all images/videos, and close the modal
+async function openAndExtractFromPost(
+  postUrl,
+  imageUrls,
+  errors,
+  smartMode = false
+) {
+  try {
+    debugLog(`Opening post: ${postUrl}`);
+    // Try to scroll to the post's position to ensure its link is loaded in the DOM
+    let found = false;
+    for (let scrollTry = 0; scrollTry < 20; scrollTry++) {
+      let postLink = Array.from(
+        document.querySelectorAll('a[href*="/p/"]')
+      ).find((a) => a.href.split("?")[0] === postUrl.replace(/\/$/, ""));
+      if (postLink) {
+        postLink.scrollIntoView({ behavior: "instant", block: "center" });
+        await wait(300);
+        postLink.click();
+        found = true;
+        break;
+      }
+      // Scroll down a bit to load more posts
+      window.scrollBy(0, 600);
+      await wait(400);
+    }
+    if (!found) {
+      errors.push(
+        `Could not find post link in DOM for ${postUrl} after scrolling. Skipping.`
+      );
+      debugLog(
+        `Could not find post link in DOM for ${postUrl} after scrolling. Skipping.`
+      );
+      return;
+    }
 
-  // Click to open modal
-  postLink.scrollIntoView({ behavior: "smooth", block: "center" });
-  await wait(500);
-  postLink.click();
-  await randomDelay(2000, 3000);
+    // Wait for modal to appear
+    let modal = null;
+    for (let i = 0; i < 20; i++) {
+      modal = document.querySelector('div[role="dialog"]');
+      if (modal) break;
+      await wait(300);
+    }
+    if (!modal) throw new Error("Modal did not appear for post.");
+    await wait(500); // Let modal content load
 
-  // Wait for modal to open
-  const modal = await waitForModal();
-  if (!modal) {
-    throw new Error("Modal did not open");
-  }
+    // Helper to collect all images/videos from modal
+    function collectMediaFromModal(modal) {
+      const found = [];
+      // Images
+      modal.querySelectorAll("img").forEach((img) => {
+        if (img.src && !imageUrls.has(img.src)) found.push(img.src);
+      });
+      // Videos
+      modal.querySelectorAll("video").forEach((vid) => {
+        if (vid.src && !imageUrls.has(vid.src)) found.push(vid.src);
+      });
+      return found;
+    }
 
-  // Extract images from modal
-  await extractImagesFromModal(modal, imageUrls);
-
-  // Navigate through carousel if present
-  await navigateCarousel(modal, imageUrls);
-
-  // Close modal
-  await closeModal(modal);
-}
-
-function findPostLink(postUrl) {
-  const selectors = [
-    `a[href="${postUrl}"]`,
-    `a[href^="${postUrl.replace(/\/$/, "")}"]`,
-    'a[href*="/p/"]',
-  ];
-
-  for (const selector of selectors) {
-    const links = document.querySelectorAll(selector);
-    for (const link of links) {
-      if (link.href.includes(postUrl.match(/\/p\/([^\/]+)/)?.[1] || "")) {
-        return link;
+    // Detect carousel: look for next button
+    let isCarousel = !!modal.querySelector(
+      'button[aria-label*="Next" i], button svg[aria-label*="Next" i]'
+    );
+    let seen = new Set();
+    let tries = 0;
+    while (true) {
+      // Collect media from current slide
+      const found = collectMediaFromModal(modal);
+      found.forEach((url) => imageUrls.add(url));
+      found.forEach((url) => seen.add(url));
+      // Try to go to next slide if carousel
+      const nextBtn = modal.querySelector(
+        'button[aria-label*="Next" i], button svg[aria-label*="Next" i]'
+      );
+      if (isCarousel && nextBtn && tries < 20) {
+        nextBtn.click();
+        await wait(600);
+        tries++;
+        // Stop if no new images/videos are found
+        const newFound = collectMediaFromModal(modal).filter(
+          (url) => !seen.has(url)
+        );
+        if (newFound.length === 0) break;
+      } else {
+        break;
       }
     }
-  }
-  return null;
-}
 
-async function waitForModal(timeout = 10000) {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    const modal = document.querySelector('div[role="dialog"]');
-    if (modal && modal.offsetHeight > 0) {
-      return modal;
+    // Close modal
+    const closeBtn = modal.querySelector(
+      'svg[aria-label="Close"], button[aria-label*="Close" i]'
+    );
+    if (closeBtn) {
+      closeBtn.closest("button")?.click();
+      await wait(500);
+    } else {
+      // Fallback: press Escape
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", keyCode: 27, which: 27 })
+      );
+      await wait(500);
     }
-    await wait(100);
+    debugLog(`Extracted ${seen.size} images/videos from post: ${postUrl}`);
+  } catch (err) {
+    errors.push(`openAndExtractFromPost failed for ${postUrl}: ${err.message}`);
+    debugLog(`openAndExtractFromPost failed for ${postUrl}: ${err.message}`);
   }
-  return null;
 }
 
-async function extractImagesFromModal(modal, imageUrls) {
-  // Multiple strategies to find images
-  const strategies = [
-    () => modal.querySelectorAll("img"),
-    () => modal.querySelectorAll('[style*="background-image"]'),
-    () => document.querySelectorAll('div[role="dialog"] img'),
-  ];
-
-  for (const strategy of strategies) {
-    try {
-      const elements = strategy();
-      elements.forEach((element) => {
-        if (element.tagName === "IMG") {
-          if (
-            element.src &&
-            element.src.includes("instagram") &&
-            element.naturalWidth > 150
-          ) {
-            imageUrls.add(element.src);
-          }
-        } else if (element.style && element.style.backgroundImage) {
-          const match = element.style.backgroundImage.match(
-            /url\(['"]?(.*?)['"]?\)/
-          );
-          if (match && match[1] && match[1].includes("instagram")) {
-            imageUrls.add(match[1]);
+// == Instagram GraphQL API Extraction ==
+async function extractAllMediaViaGraphQL(errors, btn) {
+  try {
+    btn.textContent = "API: Getting user ID...";
+    // 1. Get user ID from window._sharedData or by scraping the page
+    let userId = null;
+    // Try to get from window._sharedData (classic IG)
+    if (
+      window._sharedData &&
+      window._sharedData.entry_data &&
+      window._sharedData.entry_data.ProfilePage
+    ) {
+      userId = window._sharedData.entry_data.ProfilePage[0].graphql.user.id;
+    }
+    // Try to get from scripts (modern IG)
+    if (!userId) {
+      const scripts = Array.from(document.scripts);
+      for (const script of scripts) {
+        if (script.textContent.includes("profilePage_")) {
+          const match = script.textContent.match(/"profilePage_([0-9]+)"/);
+          if (match) {
+            userId = match[1];
+            break;
           }
         }
-      });
-    } catch (error) {
-      debugLog("Image extraction strategy failed:", error);
-    }
-  }
-}
-
-async function navigateCarousel(modal, imageUrls) {
-  let attempts = 0;
-  const maxAttempts = 15;
-  let lastImageCount = imageUrls.size;
-
-  while (attempts < maxAttempts) {
-    // Look for next button with multiple selectors
-    const nextSelectors = [
-      'div[role="dialog"] svg[aria-label="Next"]',
-      'div[role="dialog"] button[aria-label="Next"]',
-      'div[role="dialog"] [aria-label="Next"]',
-      'button:has(svg[aria-label="Next"])',
-    ];
-
-    let nextButton = null;
-    for (const selector of nextSelectors) {
-      try {
-        nextButton = modal.querySelector(selector);
-        if (nextButton) break;
-      } catch (e) {
-        // Ignore selector errors
       }
     }
-
-    if (!nextButton) break;
-
-    // Click next button
-    const clickableElement =
-      nextButton.closest("button") || nextButton.parentElement;
-    if (clickableElement) {
-      clickableElement.click();
-      await randomDelay(1000, 1500);
-
-      // Extract new images
-      await extractImagesFromModal(modal, imageUrls);
-
-      // Check if we got new images
-      if (imageUrls.size === lastImageCount) {
-        break; // No new images, probably reached the end
+    // Try to get from meta tags
+    if (!userId) {
+      const meta = document.querySelector('meta[property="al:ios:url"]');
+      if (meta && meta.content) {
+        const match = meta.content.match(/id=([0-9]+)/);
+        if (match) userId = match[1];
       }
-      lastImageCount = imageUrls.size;
     }
+    if (!userId)
+      throw new Error("Could not determine user ID for this profile.");
 
-    attempts++;
+    // 2. Fetch all posts using GraphQL API
+    btn.textContent = "API: Fetching posts...";
+    const query_hash = "58b6785bea111c67129decbe6a448951"; // profile posts
+    let hasNextPage = true;
+    let endCursor = null;
+    let allMedia = [];
+    let page = 1;
+    while (hasNextPage) {
+      const variables = {
+        id: userId,
+        first: 50,
+        after: endCursor,
+      };
+      const url = `https://www.instagram.com/graphql/query/?query_hash=${query_hash}&variables=${encodeURIComponent(
+        JSON.stringify(variables)
+      )}`;
+      btn.textContent = `API: Fetching page ${page}...`;
+      debugLog("GraphQL fetch:", url);
+      const resp = await fetch(url, { credentials: "include" });
+      if (!resp.ok)
+        throw new Error(`GraphQL fetch failed: HTTP ${resp.status}`);
+      const data = await resp.json();
+      const edges = data?.data?.user?.edge_owner_to_timeline_media?.edges || [];
+      for (const edge of edges) {
+        const node = edge.node;
+        // Helper to get highest-res image from display_resources
+        function getBestDisplayResource(node) {
+          if (
+            Array.isArray(node.display_resources) &&
+            node.display_resources.length > 0
+          ) {
+            // Use config_width/config_height for sorting if present, else fallback to width/height
+            let best = node.display_resources[0];
+            for (const res of node.display_resources) {
+              const w = res.config_width || res.width || 0;
+              const h = res.config_height || res.height || 0;
+              const bestW = best.config_width || best.width || 0;
+              const bestH = best.config_height || best.height || 0;
+              if (w * h > bestW * bestH) {
+                best = res;
+              }
+              // Prefer width >= 1080 if available (IG's max standard)
+              if (w >= 1080 && w > bestW) {
+                best = res;
+              }
+            }
+            return best.src || node.display_url;
+          }
+          return node.display_url;
+        }
+        // Single image/video
+        if (
+          node.__typename === "GraphImage" ||
+          node.__typename === "GraphVideo"
+        ) {
+          // For images, get best display_resource
+          if (node.display_resources) {
+            allMedia.push(getBestDisplayResource(node));
+          } else if (node.display_url) {
+            allMedia.push(node.display_url);
+          }
+          if (node.video_url) allMedia.push(node.video_url);
+        }
+        // Carousel
+        if (
+          node.__typename === "GraphSidecar" &&
+          node.edge_sidecar_to_children
+        ) {
+          for (const child of node.edge_sidecar_to_children.edges) {
+            const c = child.node;
+            if (c.display_resources) {
+              allMedia.push(getBestDisplayResource(c));
+            } else if (c.display_url) {
+              allMedia.push(c.display_url);
+            }
+            if (c.video_url) allMedia.push(c.video_url);
+          }
+        }
+      }
+      // Pagination
+      const pageInfo =
+        data?.data?.user?.edge_owner_to_timeline_media?.page_info;
+      hasNextPage = pageInfo?.has_next_page;
+      endCursor = pageInfo?.end_cursor;
+      page++;
+      // Safety: stop if too many
+      if (allMedia.length > 1000) break;
+    }
+    debugLog(`GraphQL extraction found ${allMedia.length} media URLs.`);
+    if (allMedia.length === 0) throw new Error("No media found via API.");
+    showModal(Array.from(new Set(allMedia)), errors);
+  } catch (err) {
+    errors.push("GraphQL extraction failed: " + err.message);
+    showModal([], errors);
   }
 }
-
-async function closeModal(modal) {
-  const closeSelectors = [
-    'div[role="dialog"] svg[aria-label="Close"]',
-    'div[role="dialog"] button[aria-label="Close"]',
-    'div[role="dialog"] [aria-label="Close"]',
-  ];
-
-  for (const selector of closeSelectors) {
-    try {
-      const closeButton = modal.querySelector(selector);
-      if (closeButton) {
-        const clickable =
-          closeButton.closest("button") || closeButton.parentElement;
-        clickable.click();
-        await wait(1000);
-        return;
-      }
-    } catch (e) {
-      // Try next selector
-    }
-  }
-
-  // Fallback: press Escape or click outside
-  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-  await wait(500);
-}
-
-debugLog("Enhanced Instagram Image Scraper loaded");
